@@ -1,2 +1,82 @@
-# Pseudo-3D
-Implement a pseudo-3D visual effect similar to 'Wolfenstein 3D' on the command line using C language ...
+# 命令行伪3D渲染器 - 纹理映射与颜色版 (Wolf3D 风格)
+
+一个完全在 **终端** 中运行的 **伪3D游戏引擎**，灵感来自经典的《德军总部 3D》（Wolfenstein 3D）。使用 **ANSI 256 色** 和 **纹理字符映射**，在终端字符网格上模拟出带纹理的墙壁、地板/天花板棋盘格以及自由移动的 3D 视角。
+
+无需任何图形库，仅依赖标准 C 库和数学库，即可在 SSH、TTY 或任何现代终端中体验老派 FPS 的乐趣。
+
+*(实际运行效果请在自己终端中体验！)*
+
+## ✨ 特性
+
+- 🧱 **三种纹理材质**：砖墙、石墙、木墙，每种都有独特的渐变字符和 ANSI 颜色。
+- 🎨 **动态亮度**：墙壁颜色随距离自然衰减，增加深度感。
+- 🔲 **地板/天花板棋盘格**：通过纹理坐标生成无限延伸的地面与天花板。
+- 🎮 **实时移动与转向**：WASD 移动，鼠标/键盘转向，平滑帧率。
+- 🖥️ **纯终端渲染**：完全基于 `printf` 和 ANSI 转义序列，无需 X11/Wayland。
+
+## 🚀 快速开始
+
+### 系统要求
+
+- Linux / macOS / Windows (WSL 或 MSYS2)
+- GCC (或任何支持 C99 的编译器)
+- 支持 256 色的终端（例如：GNOME Terminal, Konsole, iTerm2, Windows Terminal）
+
+### 编译
+
+```bash
+gcc -O3 -o wolf3d_texture wolf3d_texture.c -lm
+```
+
+### 运行
+
+```bash
+./wolf3d_texture
+```
+
+> **注意**：运行前请确保终端窗口尺寸 **至少 80x40 字符**，否则显示会错位。  
+> 推荐最大化终端窗口以获得最佳体验。
+
+## 🎮 控制方式
+
+| 按键            | 动作               |
+|----------------|-------------------|
+| `W` / `S`      | 前进 / 后退        |
+| `A` / `D`      | 左右平移（strafing）|
+| `Q` / `E`      | 左转 / 右转         |
+| **鼠标左右移动** | 转向（需终端支持鼠标事件） |
+| `ESC` 或 `Q`   | 退出游戏            |
+
+> 部分终端可能需要额外配置才能正确识别鼠标输入，如果鼠标无效请使用 `Q`/`E` 转向。
+
+## 🧠 工作原理
+
+- **射线投射 (Ray Casting)**：对屏幕每一列发射一条射线，检测与地图网格的交点，计算垂直距离。
+- **纹理映射**：根据撞击点精确计算墙面水平纹理坐标（0~1），映射到预定义的 8 级字符渐变集。
+- **地板/天花板**：利用“垂直行距离”公式反推世界坐标，生成棋盘格纹理。
+- **ANSI 颜色**：每个材质固定一个 256 色调色板索引，通过 `\033[38;5;%dm` 动态切换前景色。
+
+## 🗺️ 地图编辑
+
+游戏内置一个 32x32 的静态地图（见源码中的 `worldMap` 数组）。你可以轻松修改：
+
+- `0`：空地（可走）
+- `1`：砖墙
+- `2`：石墙
+- `3`：木墙
+
+地图四周由墙壁围成一个封闭空间，内部可自行设计走廊和房间。
+
+## 📷 截图
+
+*由于终端渲染无法直接截图，以下为模拟效果：*
+<img width="952" height="733" alt="图片" src="https://github.com/user-attachments/assets/a0f04cc9-cb38-4545-9fcd-a392767232ee" />
+<img width="895" height="718" alt="图片" src="https://github.com/user-attachments/assets/a87796bc-3bde-4fce-acce-2a36117ba645" />
+<img width="695" height="752" alt="图片" src="https://github.com/user-attachments/assets/520f4a1c-239e-4191-96a1-fd6d5d149487" />
+
+
+## 🙏 致谢
+
+- [Lode's Computer Graphics Tutorial](https://lodev.org/cgtutor/raycasting.html) – 射线投射经典教程
+- id Software 的《德军总部 3D》 – 灵感来源
+- 所有复古终端游戏爱好者
