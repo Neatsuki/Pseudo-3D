@@ -25,13 +25,13 @@
 ### 编译
 
 ```bash
-gcc -O3 -o wolf3d_texture wolf3d_texture.c -lm
+gcc -O3 -o wolf3d wolf3d.c -lm
 ```
 
 ### 运行
 
 ```bash
-./wolf3d_texture
+./wolf3d
 ```
 
 > **注意**：运行前请确保终端窗口尺寸 **至少 80x40 字符**，否则显示会错位。  
