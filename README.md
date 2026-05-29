@@ -69,7 +69,7 @@ gcc -O3 -o wolf3d_texture wolf3d_texture.c -lm
 
 ## 📷 截图
 
-*由于终端渲染无法直接截图，以下为模拟效果：*
+*游戏截图：*
 <img width="952" height="733" alt="图片" src="https://github.com/user-attachments/assets/a0f04cc9-cb38-4545-9fcd-a392767232ee" />
 <img width="895" height="718" alt="图片" src="https://github.com/user-attachments/assets/a87796bc-3bde-4fce-acce-2a36117ba645" />
 <img width="695" height="752" alt="图片" src="https://github.com/user-attachments/assets/520f4a1c-239e-4191-96a1-fd6d5d149487" />
