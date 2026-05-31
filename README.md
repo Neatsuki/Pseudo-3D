@@ -1,82 +1,190 @@
-# 命令行伪3D渲染器 - 纹理映射与颜色版 (Wolf3D 风格)
+# 命令行伪3D渲染器 - 终极增强版（Wolf3D CLI Engine）
 
-一个完全在 **终端** 中运行的 **伪3D游戏引擎**，灵感来自经典的《德军总部 3D》（Wolfenstein 3D）。使用 **ANSI 256 色** 和 **纹理字符映射**，在终端字符网格上模拟出带纹理的墙壁、地板/天花板棋盘格以及自由移动的 3D 视角。
+一个完全运行在 **终端（Terminal）** 中的高级伪3D游戏引擎 / Raycasting Engine，灵感来自经典《Wolfenstein 3D》（德军总部3D）。
 
-无需任何图形库，仅依赖标准 C 库和数学库，即可在 SSH、TTY 或任何现代终端中体验老派 FPS 的乐趣。
+支持现代化扩展功能，同时保持纯 C 语言实现，无任何外部图形库依赖。
 
-*(实际运行效果请在自己终端中体验！)*
+---
 
-## ✨ 特性
+## ✨ Features / 特性
 
-- 🧱 **三种纹理材质**：砖墙、石墙、木墙，每种都有独特的渐变字符和 ANSI 颜色。
-- 🎨 **动态亮度**：墙壁颜色随距离自然衰减，增加深度感。
-- 🔲 **地板/天花板棋盘格**：通过纹理坐标生成无限延伸的地面与天花板。
-- 🎮 **实时移动与转向**：WASD 移动，鼠标/键盘转向，平滑帧率。
-- 🖥️ **纯终端渲染**：完全基于 `printf` 和 ANSI 转义序列，无需 X11/Wayland。
+### 🎮 核心3D引擎
+- DDA Raycasting 实时渲染
+- 每一列像素独立射线计算
+- 墙体真实距离透视
+- 终端伪3D沉浸效果
 
-## 🚀 快速开始
+### 🧠 敌人 AI 系统
+- 状态机 AI：
+  - IDLE（巡逻）
+  - CHASE（追击玩家）
+  - ATTACK（近战攻击）
+- 自动寻路追踪玩家
+- 简单碰撞避免穿墙
+
+### 🔫 武器系统
+- 手枪（Pistol）
+- 霰弹枪（Shotgun）
+- 武器切换（1 / 2）
+- 射击冷却系统（Cooldown）
+- 弹药系统（Ammo）
+
+### 💥 战斗系统
+- 子弹实体（Bullet Entity）
+- 命中检测（Collision）
+- 敌人 HP 系统
+- 击杀与死亡逻辑
+
+### 🎁 拾取系统（Pickups）
+- ❤️ 血包（HP +20）
+- 🔫 弹药（Ammo +10）
+- 自动范围拾取
+
+### 🚪 动态门系统（Doors）
+- 开 / 关门动画
+- 平滑插值（Animation blending）
+- 地图可破坏通行
+
+### 🗺️ 小地图系统（Minimap）
+- 实时玩家位置
+- 地图网格显示
+- 玩家方向标记（@）
+
+### 🌫️ 雾效系统（Fog）
+- 距离衰减渲染：
+  - `#` 近
+  - `O`
+  - `o`
+  - `.`
+  - 空白（远）
+- 增强空间深度感
+
+### 🎯 HUD 系统
+- HP 生命值
+- Ammo 弹药
+- Score 分数
+- Position 坐标
+
+### 🧱 程序生成地图
+- 随机地图生成（Procedural Map）
+- 自动封闭边界
+- 可扩展房间结构
+
+### ⚡ 性能优化
+- 60 FPS 终端渲染（约16ms帧）
+- Buffer 渲染机制
+- z-buffer 深度控制
+
+---
+
+## 🚀 快速开始（Quick Start）
 
 ### 系统要求
-
-- Linux / macOS / Windows (WSL 或 MSYS2)
-- GCC (或任何支持 C99 的编译器)
-- 支持 256 色的终端（例如：GNOME Terminal, Konsole, iTerm2, Windows Terminal）
+- Linux / macOS / WSL
+- GCC / Clang
+- 支持 ANSI escape terminal
 
 ### 编译
-
 ```bash
-gcc -O3 -o wolf3d wolf3d.c -lm
+gcc -O3 wolf3d.c -o wolf3d -lm
 ```
 
 ### 运行
-
 ```bash
 ./wolf3d
 ```
 
-> **注意**：运行前请确保终端窗口尺寸 **至少 80x40 字符**，否则显示会错位。  
-> 推荐最大化终端窗口以获得最佳体验。
+> ⚠️ 推荐终端尺寸：**80 x 40 或更大**
 
-## 🎮 控制方式
+---
 
-| 按键            | 动作               |
-|----------------|-------------------|
-| `W` / `S`      | 前进 / 后退        |
-| `A` / `D`      | 左右平移（strafing）|
-| `Q` / `E`      | 左转 / 右转         |
-| **鼠标左右移动** | 转向（需终端支持鼠标事件） |
-| `ESC` 或 `Q`   | 退出游戏            |
+## 🎮 控制方式（Controls）
 
-> 部分终端可能需要额外配置才能正确识别鼠标输入，如果鼠标无效请使用 `Q`/`E` 转向。
+| 按键 | 功能 |
+|------|------|
+| W / S | 前进 / 后退 |
+| A / D | 左右旋转 |
+| SPACE | 射击 |
+| 1 / 2 | 切换武器 |
+| X | 开门 |
+| R | 装弹 |
+| H | 加血（调试） |
+| ESC | 退出游戏 |
 
-## 🧠 工作原理
+---
 
-- **射线投射 (Ray Casting)**：对屏幕每一列发射一条射线，检测与地图网格的交点，计算垂直距离。
-- **纹理映射**：根据撞击点精确计算墙面水平纹理坐标（0~1），映射到预定义的 8 级字符渐变集。
-- **地板/天花板**：利用“垂直行距离”公式反推世界坐标，生成棋盘格纹理。
-- **ANSI 颜色**：每个材质固定一个 256 色调色板索引，通过 `\033[38;5;%dm` 动态切换前景色。
+## 🧠 技术原理（How It Works）
 
-## 🗺️ 地图编辑
+### 📡 Raycasting（核心）
+- 每一列屏幕发射射线
+- DDA 算法遍历网格
+- 计算墙体碰撞距离
+- 生成垂直投影高度
 
-游戏内置一个 32x32 的静态地图（见源码中的 `worldMap` 数组）。你可以轻松修改：
+### 🎨 渲染流程
+1. 清空 buffer
+2. Raycast walls
+3. 渲染 floor / ceiling
+4. 渲染 enemies & pickups
+5. HUD overlay
+6. 输出到 terminal
 
-- `0`：空地（可走）
-- `1`：砖墙
-- `2`：石墙
-- `3`：木墙
+### 🤖 AI 逻辑
+- 距离判断：
+  - 远 → IDLE
+  - 中 → CHASE
+  - 近 → ATTACK
+- 向量归一化移动
 
-地图四周由墙壁围成一个封闭空间，内部可自行设计走廊和房间。
+---
 
-## 📷 截图
+## 🗺️ 地图系统（Map System）
 
-*游戏截图：*
+- `0` = 空地
+- `1` = 墙体
+- 支持：
+  - 动态门
+  - 随机生成
+  - 碰撞检测
+
+---
+
+## 🔥 Modern Features / 最新升级
+
+✔ 完整 FPS 战斗循环系统  
+✔ 敌人 AI 状态机系统  
+✔ 双武器系统（手枪 / 霰弹枪）  
+✔ 子弹物理系统  
+✔ 拾取系统（HP / Ammo）  
+✔ 动态门动画系统  
+✔ 小地图 HUD 系统  
+✔ 雾效距离渲染  
+✔ 程序生成地图  
+✔ z-buffer 深度渲染优化  
+✔ 终端 3D 渲染优化  
+✔ 完整实体系统（Enemy / Bullet / Pickup / Door）
+
+---
+
+## 📷 Screenshots / 截图
+
 <img width="952" height="733" alt="图片" src="https://github.com/user-attachments/assets/a0f04cc9-cb38-4545-9fcd-a392767232ee" />
 <img width="895" height="718" alt="图片" src="https://github.com/user-attachments/assets/a87796bc-3bde-4fce-acce-2a36117ba645" />
 <img width="695" height="752" alt="图片" src="https://github.com/user-attachments/assets/520f4a1c-239e-4191-96a1-fd6d5d149487" />
 
+---
 
-## 🙏 致谢
+## 🙏 致谢（Credits）
 
 - [Lode's Computer Graphics Tutorial](https://lodev.org/cgtutor/raycasting.html) – 射线投射经典教程
-- id Software 的《德军总部 3D》 – 灵感来源
-- 所有复古终端游戏爱好者
+- id Software — Wolfenstein 3D 灵感来源
+- Retro FPS & Terminal Gaming 社区
+- C Language / Unix Terminal hackers
+
+---
+
+
+## ⚡ Note
+
+This project is fully terminal-based.
+No GPU. No engine. Only math + C + imagination.
