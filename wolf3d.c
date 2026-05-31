@@ -1,769 +1,2040 @@
-/**
- * 命令行伪3D渲染器
- * 编译: gcc -O3 -o wolf3d wolf3d.c -lm
- * 运行: ./wolf3d
- */
+// =============================
+// Wolf3D CLI - Part 1
+// 基础引擎层
+// =============================
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <time.h>
 #include <unistd.h>
 #include <termios.h>
-#include <fcntl.h>
-#include <signal.h>
 #include <sys/time.h>
+#include <fcntl.h>
 
-/* ---------- 配置常量 ---------- */
-#define MAP_WIDTH      32
-#define MAP_HEIGHT     32
-#define SCREEN_WIDTH   80
-#define SCREEN_HEIGHT  40
-#define FOV            M_PI_4
-#define RENDER_DEPTH   16
+// =============================
+// 配置
+// =============================
 
-#define PLAYER_RADIUS  0.30f
-#define MOVE_SPEED     5.0f
-#define ROT_SPEED      2.5f
-#define MOUSE_SENS     0.008f
+#define W 80
+#define H 40
 
-#define MAX_FRAME_TIME 0.05f
-#define SUB_STEPS      2
+#define MAP_W 24
+#define MAP_H 24
 
-/* 菜单状态 */
-typedef enum {
-    MENU_MAIN,
-    MENU_SETTINGS,
-    MENU_GAMEPLAY,
-    MENU_QUIT
-} MenuState;
+#define MOVE_SPEED 5.0f
+#define ROT_SPEED  2.5f
 
-/* 设置选项 */
+// =============================
+// 数据结构
+// =============================
+
+// 玩家
 typedef struct {
-    float mouseSensitivity;
-    int   showFPS;
-    int   showMinimap;
-    int   showCrosshair;
-    float volume;
-} Settings;
+    float x, y;
+    float dirX, dirY;
+    float planeX, planeY;
+    int hp;
+} Player;
 
-static Settings settings = {
-    .mouseSensitivity = 0.008f,
-    .showFPS = 1,
-    .showMinimap = 1,
-    .showCrosshair = 1,
-    .volume = 0.5f
-};
+// 输入
+static int key[512];
 
-/* 输入键位映射 */
-typedef struct {
-    int forward;
-    int backward;
-    int left;
-    int right;
-    int turnLeft;
-    int turnRight;
-    int quit;
-    int menu;
-} KeyBindings;
+// 地图
+static int worldMap[MAP_W][MAP_H];
 
-static KeyBindings keys = {
-    'w', 's', 'a', 'd', 'q', 'e', 27, 'm'
-};
-
-/* ---------- 材质定义 ---------- */
-static const char* texChars[] = {
-    NULL,
-    " .,:;!|#@",   /* 砖墙 */
-    " .,:;oO0#",   /* 石墙 */
-    " .,:!|\\M#"    /* 木墙 */
-};
-
-static const int texColors[] = { 0, 130, 245, 94 };
-#define FLOOR_COLOR   235
-#define CEIL_COLOR    251
-
-/* ---------- 世界地图 ---------- */
-static const int worldMap[MAP_HEIGHT][MAP_WIDTH] = {
-    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,2,2,2,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,2,2,2,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1},
-    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
-};
-
-/* 玩家状态 */
-static float posX = 8.5f, posY = 8.5f;  /* 起始位置移到安全区域 */
-static float dirX = -1.0f, dirY = 0.0f;
-static float planeX = 0.0f, planeY = 0.66f;
-
-/* 输入系统 */
-static int keyState[512] = {0};  /* 扩大数组 */
-static int mouseFd = -1;
+// 终端状态
 static struct termios orig_termios;
 
-/* 渲染缓存 */
-static float cachedCameraX[SCREEN_WIDTH];
-static float cachedRayDirX[SCREEN_WIDTH];
-static float cachedRayDirY[SCREEN_WIDTH];
+// 时间
+static struct timeval lastTime;
 
-static float wallDist[SCREEN_WIDTH];
-static int   wallSide[SCREEN_WIDTH];
-static float wallTexX[SCREEN_WIDTH];
-static int   wallMat[SCREEN_WIDTH];
-static int   wallDrawStart[SCREEN_WIDTH];
-static int   wallDrawEnd[SCREEN_WIDTH];
+// 玩家实例
+static Player player;
 
-/* 帧率统计 */
-static float fps = 60.0f;
-static int frameCount = 0;
-static struct timeval lastFPS;
+// =============================
+// 数学工具
+// =============================
 
-/* 游戏状态 */
-static int inGame = 0;
-static MenuState menuState = MENU_MAIN;
-static int menuSelection = 0;
-
-/* ---------- 辅助函数 ---------- */
-void prepareTerminal() {
-    printf("\033[?25l\033[2J\033[H");
-    fflush(stdout);
+static float clampf(float v, float a, float b) {
+    if (v < a) return a;
+    if (v > b) return b;
+    return v;
 }
 
-void restoreTerminal() {
-    printf("\033[?25h\n");
-    fflush(stdout);
-}
+// =============================
+// 终端控制
+// =============================
 
-int isSolidCell(int x, int y) {
-    if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT)
-        return 1;
-    return worldMap[y][x] != 0;
-}
-
-int checkCollision(float x, float y) {
-    int minX = (int)(x - PLAYER_RADIUS);
-    int maxX = (int)(x + PLAYER_RADIUS);
-    int minY = (int)(y - PLAYER_RADIUS);
-    int maxY = (int)(y + PLAYER_RADIUS);
-
-    for (int yi = minY; yi <= maxY; yi++) {
-        for (int xi = minX; xi <= maxX; xi++) {
-            if (isSolidCell(xi, yi)) {
-                float closestX = fmax(xi - 0.5f, fmin(x, xi + 0.5f));
-                float closestY = fmax(yi - 0.5f, fmin(y, yi + 0.5f));
-                float dx = x - closestX;
-                float dy = y - closestY;
-                if (dx * dx + dy * dy < PLAYER_RADIUS * PLAYER_RADIUS)
-                    return 1;
-            }
-        }
-    }
-    return 0;
-}
-
-void tryMove(float dx, float dy, float *newX, float *newY) {
-    float origX = *newX, origY = *newY;
-
-    float testX = origX + dx;
-    if (!checkCollision(testX, origY)) {
-        *newX = testX;
-    }
-
-    float testY = origY + dy;
-    if (!checkCollision(origX, testY)) {
-        *newY = testY;
-    }
-
-    if (!checkCollision(origX + dx, origY + dy)) {
-        *newX = origX + dx;
-        *newY = origY + dy;
-    }
-}
-
-/* ---------- 终端控制 ---------- */
-void disableRawMode() {
+static void disableRaw() {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
 
-void enableRawMode() {
+static void enableRaw() {
     tcgetattr(STDIN_FILENO, &orig_termios);
-    atexit(disableRawMode);
+    atexit(disableRaw);
+
     struct termios raw = orig_termios;
     raw.c_lflag &= ~(ECHO | ICANON | ISIG);
     raw.c_cc[VMIN] = 0;
     raw.c_cc[VTIME] = 0;
+
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
 
-int keyPressed() {
+// 清屏
+static void clearScreen() {
+    printf("\033[2J\033[H");
+}
+
+// =============================
+// 输入系统
+// =============================
+
+static int kbhit() {
     struct timeval tv = {0, 0};
     fd_set fds;
+
     FD_ZERO(&fds);
     FD_SET(STDIN_FILENO, &fds);
+
     return select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) > 0;
 }
 
-void updateKeyState() {
+static void updateInput() {
     char c;
-    if (read(STDIN_FILENO, &c, 1) != 1) return;
+    while (read(STDIN_FILENO, &c, 1) == 1) {
+        key[(unsigned char)c] = 1;
+    }
+}
 
-    if (c == '\033') {
-        char seq[2];
-        if (read(STDIN_FILENO, &seq[0], 1) != 1) return;
-        if (read(STDIN_FILENO, &seq[1], 1) != 1) return;
-        if (seq[0] == '[') {
-            int code = 0;
-            switch (seq[1]) {
-                case 'A': code = 1000; break;
-                case 'B': code = 1001; break;
-                case 'C': code = 1002; break;
-                case 'D': code = 1003; break;
-            }
-            if (code && code < 512) keyState[code] = 1;
+static void clearInput() {
+    memset(key, 0, sizeof(key));
+}
+
+// =============================
+// 时间系统
+// =============================
+
+static float getDeltaTime() {
+    struct timeval now;
+    gettimeofday(&now, NULL);
+
+    float dt =
+        (now.tv_sec - lastTime.tv_sec) +
+        (now.tv_usec - lastTime.tv_usec) / 1000000.0f;
+
+    lastTime = now;
+    return dt;
+}
+
+// =============================
+// 地图系统
+// =============================
+
+// 简单地图
+static void initMap() {
+    for (int y = 0; y < MAP_H; y++) {
+        for (int x = 0; x < MAP_W; x++) {
+            if (y == 0 || x == 0 || y == MAP_H - 1 || x == MAP_W - 1)
+                worldMap[x][y] = 1;
+            else
+                worldMap[x][y] = 0;
         }
+    }
+
+    worldMap[10][10] = 1;
+    worldMap[11][10] = 1;
+    worldMap[12][10] = 1;
+}
+
+// 是否是墙
+static int isWall(int x, int y) {
+    if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H)
+        return 1;
+    return worldMap[x][y] != 0;
+}
+
+// =============================
+// 碰撞系统
+// =============================
+
+static int checkCollision(float x, float y) {
+    int ix = (int)x;
+    int iy = (int)y;
+
+    return isWall(ix, iy);
+}
+
+// =============================
+// 玩家系统
+// =============================
+
+static void initPlayer() {
+    player.x = 3.5f;
+    player.y = 3.5f;
+
+    player.dirX = -1.0f;
+    player.dirY = 0.0f;
+
+    player.planeX = 0.0f;
+    player.planeY = 0.66f;
+
+    player.hp = 100;
+}
+
+static void movePlayer(float dt) {
+    float move = 0;
+
+    if (key['w']) move = 1;
+    if (key['s']) move = -1;
+
+    float newX = player.x + player.dirX * move * MOVE_SPEED * dt;
+    float newY = player.y + player.dirY * move * MOVE_SPEED * dt;
+
+    if (!checkCollision(newX, player.y))
+        player.x = newX;
+
+    if (!checkCollision(player.x, newY))
+        player.y = newY;
+}
+
+static void rotatePlayer(float dt) {
+    float rot = 0;
+
+    if (key['a']) rot = 1;
+    if (key['d']) rot = -1;
+
+    float angle = rot * ROT_SPEED * dt;
+
+    float oldDirX = player.dirX;
+    player.dirX = player.dirX * cosf(angle) - player.dirY * sinf(angle);
+    player.dirY = oldDirX * sinf(angle) + player.dirY * cosf(angle);
+
+    float oldPlaneX = player.planeX;
+    player.planeX = player.planeX * cosf(angle) - player.planeY * sinf(angle);
+    player.planeY = oldPlaneX * sinf(angle) + player.planeY * cosf(angle);
+}
+
+// =============================
+// 初始化
+// =============================
+
+static void initEngine() {
+    memset(key, 0, sizeof(key));
+
+    enableRaw();
+    clearScreen();
+
+    initMap();
+    initPlayer();
+
+    gettimeofday(&lastTime, NULL);
+}
+
+// =============================
+// 调试输出
+// =============================
+
+static void drawDebug() {
+    printf("\033[H");
+    printf("Wolf3D Part1\n");
+    printf("Player: %.2f %.2f\n", player.x, player.y);
+}
+// =============================
+// Wolf3D CLI - Part 2
+// 射线投射 + 渲染核心
+// =============================
+
+#include <stdio.h>
+#include <math.h>
+
+// =============================
+// 渲染缓冲区
+// =============================
+
+static char screen[W][H];
+static float zbuffer[W];
+
+// =============================
+// 清空屏幕缓冲
+// =============================
+
+static void clearBuffer() {
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            screen[x][y] = ' ';
+        }
+    }
+}
+
+// =============================
+// DDA射线投射
+// =============================
+
+static float castRay(float rayDirX, float rayDirY, int *hitSide) {
+    int mapX = (int)player.x;
+    int mapY = (int)player.y;
+
+    float deltaDistX = fabsf(1.0f / (rayDirX == 0 ? 0.0001f : rayDirX));
+    float deltaDistY = fabsf(1.0f / (rayDirY == 0 ? 0.0001f : rayDirY));
+
+    int stepX, stepY;
+    float sideDistX, sideDistY;
+
+    if (rayDirX < 0) {
+        stepX = -1;
+        sideDistX = (player.x - mapX) * deltaDistX;
+    } else {
+        stepX = 1;
+        sideDistX = (mapX + 1.0f - player.x) * deltaDistX;
+    }
+
+    if (rayDirY < 0) {
+        stepY = -1;
+        sideDistY = (player.y - mapY) * deltaDistY;
+    } else {
+        stepY = 1;
+        sideDistY = (mapY + 1.0f - player.y) * deltaDistY;
+    }
+
+    int hit = 0;
+    int side = 0;
+
+    while (!hit) {
+        if (sideDistX < sideDistY) {
+            sideDistX += deltaDistX;
+            mapX += stepX;
+            side = 0;
+        } else {
+            sideDistY += deltaDistY;
+            mapY += stepY;
+            side = 1;
+        }
+
+        if (isWall(mapX, mapY))
+            hit = 1;
+    }
+
+    *hitSide = side;
+
+    float dist;
+    if (side == 0)
+        dist = sideDistX - deltaDistX;
+    else
+        dist = sideDistY - deltaDistY;
+
+    return dist;
+}
+
+// =============================
+// 渲染一帧（墙）
+// =============================
+
+static void renderWalls() {
+    for (int x = 0; x < W; x++) {
+
+        float cameraX = 2.0f * x / (float)W - 1.0f;
+
+        float rayDirX = player.dirX + player.planeX * cameraX;
+        float rayDirY = player.dirY + player.planeY * cameraX;
+
+        int side;
+        float dist = castRay(rayDirX, rayDirY, &side);
+
+        zbuffer[x] = dist;
+
+        int lineHeight = (int)(H / (dist + 0.0001f));
+
+        int drawStart = -lineHeight / 2 + H / 2;
+        int drawEnd   = lineHeight / 2 + H / 2;
+
+        if (drawStart < 0) drawStart = 0;
+        if (drawEnd >= H) drawEnd = H - 1;
+
+        char wallChar = side ? '|' : '#';
+
+        for (int y = 0; y < H; y++) {
+
+            if (y >= drawStart && y <= drawEnd) {
+                screen[x][y] = wallChar;
+            }
+        }
+    }
+}
+
+// =============================
+// 地板+天花板
+// =============================
+
+static void renderFloorCeil() {
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+
+            if (screen[x][y] == ' ') {
+
+                if (y < H / 2)
+                    screen[x][y] = '.';
+                else
+                    screen[x][y] = ',';
+            }
+        }
+    }
+}
+
+// =============================
+// 输出渲染
+// =============================
+
+static void present() {
+    printf("\033[H");
+
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            putchar(screen[x][y]);
+        }
+        putchar('\n');
+    }
+}
+// =============================
+// Wolf3D CLI - Part 3
+// 实体 + 游戏逻辑
+// =============================
+
+#define MAX_ENEMY 32
+#define MAX_BULLET 64
+#define MAX_DOOR 32
+
+// =============================
+// 实体系统
+// =============================
+
+typedef struct {
+    float x, y;
+    int hp;
+    int alive;
+} Enemy;
+
+typedef struct {
+    float x, y;
+    float dx, dy;
+    int active;
+} Bullet;
+
+typedef struct {
+    int x, y;
+    int open; // 0关 1开
+} Door;
+
+// =============================
+// 世界实体
+// =============================
+
+static Enemy enemies[MAX_ENEMY];
+static Bullet bullets[MAX_BULLET];
+static Door doors[MAX_DOOR];
+
+// =============================
+// 初始化实体
+// =============================
+
+static void initEntities() {
+
+    for (int i = 0; i < MAX_ENEMY; i++) {
+        enemies[i].x = 5 + i;
+        enemies[i].y = 5;
+        enemies[i].hp = 3;
+        enemies[i].alive = 1;
+    }
+
+    for (int i = 0; i < MAX_BULLET; i++) {
+        bullets[i].active = 0;
+    }
+
+    for (int i = 0; i < MAX_DOOR; i++) {
+        doors[i].x = 10;
+        doors[i].y = 10 + i;
+        doors[i].open = 0;
+    }
+}
+
+// =============================
+// 子弹系统
+// =============================
+
+static void spawnBullet() {
+    for (int i = 0; i < MAX_BULLET; i++) {
+        if (!bullets[i].active) {
+            bullets[i].x = player.x;
+            bullets[i].y = player.y;
+            bullets[i].dx = player.dirX;
+            bullets[i].dy = player.dirY;
+            bullets[i].active = 1;
+            break;
+        }
+    }
+}
+
+static void updateBullets(float dt) {
+
+    for (int i = 0; i < MAX_BULLET; i++) {
+        if (!bullets[i].active) continue;
+
+        bullets[i].x += bullets[i].dx * 10.0f * dt;
+        bullets[i].y += bullets[i].dy * 10.0f * dt;
+
+        int mx = (int)bullets[i].x;
+        int my = (int)bullets[i].y;
+
+        if (isWall(mx, my)) {
+            bullets[i].active = 0;
+        }
+    }
+}
+
+// =============================
+// 敌人AI（简单追踪）
+// =============================
+
+static void updateEnemies(float dt) {
+
+    for (int i = 0; i < MAX_ENEMY; i++) {
+
+        if (!enemies[i].alive) continue;
+
+        float dx = player.x - enemies[i].x;
+        float dy = player.y - enemies[i].y;
+
+        float len = sqrtf(dx*dx + dy*dy);
+        if (len < 0.01f) continue;
+
+        dx /= len;
+        dy /= len;
+
+        enemies[i].x += dx * dt * 1.5f;
+        enemies[i].y += dy * dt * 1.5f;
+
+        // 碰撞墙
+        if (isWall((int)enemies[i].x, (int)enemies[i].y)) {
+            enemies[i].x -= dx * dt * 1.5f;
+            enemies[i].y -= dy * dt * 1.5f;
+        }
+    }
+}
+
+// =============================
+// 子弹击中敌人
+// =============================
+
+static void bulletHitTest() {
+
+    for (int b = 0; b < MAX_BULLET; b++) {
+        if (!bullets[b].active) continue;
+
+        for (int e = 0; e < MAX_ENEMY; e++) {
+            if (!enemies[e].alive) continue;
+
+            float dx = bullets[b].x - enemies[e].x;
+            float dy = bullets[b].y - enemies[e].y;
+
+            if (dx*dx + dy*dy < 0.3f) {
+                enemies[e].hp--;
+                bullets[b].active = 0;
+
+                if (enemies[e].hp <= 0)
+                    enemies[e].alive = 0;
+            }
+        }
+    }
+}
+
+// =============================
+// 门系统
+// =============================
+
+static void openDoor(int x, int y) {
+
+    for (int i = 0; i < MAX_DOOR; i++) {
+        if (doors[i].x == x && doors[i].y == y) {
+            doors[i].open = 1;
+            worldMap[x][y] = 0;
+        }
+    }
+}
+
+// =============================
+// 玩家射击
+// =============================
+
+static void updateCombat() {
+
+    if (key[' ']) {
+        spawnBullet();
+        key[' '] = 0;
+    }
+}
+
+// =============================
+// 更新所有游戏逻辑
+// =============================
+
+static void updateGame(float dt) {
+
+    movePlayer(dt);
+    rotatePlayer(dt);
+
+    updateBullets(dt);
+    updateEnemies(dt);
+
+    bulletHitTest();
+    updateCombat();
+}
+// =============================
+// Wolf3D CLI - Part 4
+// 渲染整合 + HUD + 主循环
+// =============================
+
+// =============================
+// HUD状态
+// =============================
+
+static int ammo = 30;
+static int score = 0;
+
+// =============================
+// 精灵渲染（敌人）
+// =============================
+
+static void renderEnemies() {
+
+    for (int i = 0; i < MAX_ENEMY; i++) {
+
+        if (!enemies[i].alive) continue;
+
+        float dx = enemies[i].x - player.x;
+        float dy = enemies[i].y - player.y;
+
+        float invDet = 1.0f /
+            (player.planeX * player.dirY - player.dirX * player.planeY);
+
+        float transformX =
+            invDet * (player.dirY * dx - player.dirX * dy);
+
+        float transformY =
+            invDet * (-player.planeY * dx + player.planeX * dy);
+
+        if (transformY <= 0) continue;
+
+        int screenX = (int)((W / 2) * (1 + transformX / transformY));
+
+        int size = (int)(H / transformY);
+
+        int startY = -size / 2 + H / 2;
+        int endY   = size / 2 + H / 2;
+
+        int startX = screenX - size / 2;
+        int endX   = screenX + size / 2;
+
+        for (int x = startX; x < endX; x++) {
+
+            if (x < 0 || x >= W) continue;
+            if (transformY >= zbuffer[x]) continue;
+
+            for (int y = startY; y < endY; y++) {
+
+                if (y < 0 || y >= H) continue;
+
+                screen[x][y] = 'E';
+            }
+        }
+    }
+}
+
+// =============================
+// HUD绘制
+// =============================
+
+static void renderHUD() {
+
+    char line[128];
+
+    snprintf(line, sizeof(line),
+        "HP:%d  Ammo:%d  Score:%d  Pos:%.1f %.1f",
+        player.hp, ammo, score, player.x, player.y
+    );
+
+    for (int i = 0; i < W && line[i]; i++) {
+        screen[i][H - 1] = line[i];
+    }
+}
+
+// =============================
+// 输入控制整合
+// =============================
+
+static void handleInput(float dt) {
+
+    if (key['x']) {
+        openDoor((int)player.x, (int)player.y);
+        key['x'] = 0;
+    }
+
+    if (key['r']) {
+        ammo = 30;
+        key['r'] = 0;
+    }
+
+    if (key[27]) { // ESC
+        disableRaw();
+        clearScreen();
+        exit(0);
+    }
+}
+
+// =============================
+// 完整渲染流程
+// =============================
+
+static void renderFrame() {
+
+    clearBuffer();
+
+    renderWalls();
+    renderFloorCeil();
+
+    renderEnemies();
+    renderHUD();
+
+    present();
+}
+
+// =============================
+// 主循环
+// =============================
+
+int main() {
+
+    initEngine();
+    initEntities();
+
+    while (1) {
+
+        float dt = getDeltaTime();
+
+        updateInput();
+
+        handleInput(dt);
+        updateGame(dt);
+
+        renderFrame();
+
+        clearInput();
+
+        usleep(16000);
+    }
+
+    return 0;
+}
+// =============================
+// Wolf3D CLI - Part 5
+// 游戏增强 + 优化层
+// =============================
+
+// =============================
+// 拾取物
+// =============================
+
+typedef struct {
+    float x, y;
+    int type; // 0血包 1弹药
+    int active;
+} Pickup;
+
+#define MAX_PICKUP 32
+
+static Pickup pickups[MAX_PICKUP];
+
+// =============================
+// 初始化拾取物
+// =============================
+
+static void initPickups() {
+
+    for (int i = 0; i < MAX_PICKUP; i++) {
+        pickups[i].x = 6 + i * 0.5f;
+        pickups[i].y = 6;
+        pickups[i].type = i % 2;
+        pickups[i].active = 1;
+    }
+}
+
+// =============================
+// 拾取检测
+// =============================
+
+static void updatePickups() {
+
+    for (int i = 0; i < MAX_PICKUP; i++) {
+
+        if (!pickups[i].active) continue;
+
+        float dx = pickups[i].x - player.x;
+        float dy = pickups[i].y - player.y;
+
+        if (dx*dx + dy*dy < 0.5f) {
+
+            if (pickups[i].type == 0)
+                player.hp += 20;
+            else
+                ammo += 10;
+
+            if (player.hp > 100) player.hp = 100;
+
+            pickups[i].active = 0;
+        }
+    }
+}
+
+// =============================
+// 改进敌人AI（状态机）
+// =============================
+
+typedef enum {
+    AI_IDLE,
+    AI_CHASE,
+    AI_ATTACK
+} AIState;
+
+static AIState enemyState[MAX_ENEMY];
+
+static void updateEnemyAI(float dt) {
+
+    for (int i = 0; i < MAX_ENEMY; i++) {
+
+        if (!enemies[i].alive) continue;
+
+        float dx = player.x - enemies[i].x;
+        float dy = player.y - enemies[i].y;
+
+        float dist2 = dx*dx + dy*dy;
+
+        if (dist2 < 1.0f)
+            enemyState[i] = AI_ATTACK;
+        else if (dist2 < 25.0f)
+            enemyState[i] = AI_CHASE;
+        else
+            enemyState[i] = AI_IDLE;
+
+        if (enemyState[i] == AI_CHASE) {
+
+            float len = sqrtf(dist2) + 0.0001f;
+
+            enemies[i].x += dx / len * dt * 1.2f;
+            enemies[i].y += dy / len * dt * 1.2f;
+        }
+
+        if (enemyState[i] == AI_ATTACK) {
+
+            player.hp -= 1;
+
+            if (player.hp < 0)
+                player.hp = 0;
+        }
+    }
+}
+
+// =============================
+// 输入优化（防抖）
+// =============================
+
+static void handleBetterInput(float dt) {
+
+    static float shootCooldown = 0;
+
+    shootCooldown -= dt;
+
+    if (key[' ']) {
+        if (shootCooldown <= 0) {
+            spawnBullet();
+            ammo--;
+            if (ammo < 0) ammo = 0;
+            shootCooldown = 0.3f;
+        }
+        key[' '] = 0;
+    }
+
+    if (key['h']) {
+        player.hp += 10;
+        if (player.hp > 100) player.hp = 100;
+        key['h'] = 0;
+    }
+}
+
+// =============================
+// 调试HUD
+// =============================
+
+static void renderDebug() {
+
+    char buf[64];
+
+    snprintf(buf, sizeof(buf),
+        "Enemies:%d Bullets:%d",
+        MAX_ENEMY, MAX_BULLET
+    );
+
+    for (int i = 0; i < W && buf[i]; i++) {
+        screen[i][0] = buf[i];
+    }
+}
+
+// =============================
+// 渲染增强版
+// =============================
+
+static void renderFrameV2() {
+
+    clearBuffer();
+
+    renderWalls();
+    renderFloorCeil();
+
+    renderEnemies();
+    updatePickups();
+
+    renderHUD();
+    renderDebug();
+
+    present();
+}
+
+// =============================
+// 更新增强版
+// =============================
+
+static void updateGameV2(float dt) {
+
+    movePlayer(dt);
+    rotatePlayer(dt);
+
+    updateBullets(dt);
+    updateEnemyAI(dt);
+    updatePickups();
+
+    bulletHitTest();
+
+    handleBetterInput(dt);
+    handleInput(dt);
+}
+// =============================
+// Wolf3D CLI - Part 6
+// 渲染增强 + 世界扩展
+// =============================
+
+// =============================
+// 距离雾效字符
+// =============================
+
+static char shadeChar(float d) {
+    if (d < 1.5f) return '#';
+    if (d < 3.0f) return 'O';
+    if (d < 5.0f) return 'o';
+    if (d < 8.0f) return '.';
+    return ' ';
+}
+
+// =============================
+// 改进墙体渲染（带雾）
+// =============================
+
+static void renderWallsV2() {
+
+    for (int x = 0; x < W; x++) {
+
+        float cameraX = 2.0f * x / (float)W - 1.0f;
+
+        float rayDirX = player.dirX + player.planeX * cameraX;
+        float rayDirY = player.dirY + player.planeY * cameraX;
+
+        int side;
+        float dist = castRay(rayDirX, rayDirY, &side);
+
+        zbuffer[x] = dist;
+
+        int lineHeight = (int)(H / (dist + 0.0001f));
+
+        int drawStart = -lineHeight / 2 + H / 2;
+        int drawEnd   = lineHeight / 2 + H / 2;
+
+        if (drawStart < 0) drawStart = 0;
+        if (drawEnd >= H) drawEnd = H - 1;
+
+        char c = shadeChar(dist);
+
+        for (int y = drawStart; y <= drawEnd; y++) {
+            screen[x][y] = c;
+        }
+    }
+}
+
+// =============================
+// 拾取物渲染
+// =============================
+
+static void renderPickups() {
+
+    for (int i = 0; i < MAX_PICKUP; i++) {
+
+        if (!pickups[i].active) continue;
+
+        float dx = pickups[i].x - player.x;
+        float dy = pickups[i].y - player.y;
+
+        float invDet =
+            1.0f / (player.planeX * player.dirY - player.dirX * player.planeY);
+
+        float transformX =
+            invDet * (player.dirY * dx - player.dirX * dy);
+
+        float transformY =
+            invDet * (-player.planeY * dx + player.planeX * dy);
+
+        if (transformY <= 0) continue;
+
+        int screenX = (int)((W / 2) * (1 + transformX / transformY));
+
+        int size = (int)(H / transformY);
+
+        for (int y = -size/2 + H/2; y < size/2 + H/2; y++) {
+
+            if (y < 0 || y >= H) continue;
+            if (screenX < 0 || screenX >= W) continue;
+            if (transformY >= zbuffer[screenX]) continue;
+
+            screen[screenX][y] = (pickups[i].type == 0) ? '+' : '*';
+        }
+    }
+}
+// =============================
+// Wolf3D CLI - Part 6
+// 渲染增强 + 世界扩展
+// =============================
+
+// =============================
+// 距离雾效字符
+// =============================
+
+static char shadeChar(float d) {
+    if (d < 1.5f) return '#';
+    if (d < 3.0f) return 'O';
+    if (d < 5.0f) return 'o';
+    if (d < 8.0f) return '.';
+    return ' ';
+}
+
+// =============================
+// 改进墙体渲染（带雾）
+// =============================
+
+static void renderWallsV2() {
+
+    for (int x = 0; x < W; x++) {
+
+        float cameraX = 2.0f * x / (float)W - 1.0f;
+
+        float rayDirX = player.dirX + player.planeX * cameraX;
+        float rayDirY = player.dirY + player.planeY * cameraX;
+
+        int side;
+        float dist = castRay(rayDirX, rayDirY, &side);
+
+        zbuffer[x] = dist;
+
+        int lineHeight = (int)(H / (dist + 0.0001f));
+
+        int drawStart = -lineHeight / 2 + H / 2;
+        int drawEnd   = lineHeight / 2 + H / 2;
+
+        if (drawStart < 0) drawStart = 0;
+        if (drawEnd >= H) drawEnd = H - 1;
+
+        char c = shadeChar(dist);
+
+        for (int y = drawStart; y <= drawEnd; y++) {
+            screen[x][y] = c;
+        }
+    }
+}
+
+// =============================
+// 拾取物渲染
+// =============================
+
+static void renderPickups() {
+
+    for (int i = 0; i < MAX_PICKUP; i++) {
+
+        if (!pickups[i].active) continue;
+
+        float dx = pickups[i].x - player.x;
+        float dy = pickups[i].y - player.y;
+
+        float invDet =
+            1.0f / (player.planeX * player.dirY - player.dirX * player.planeY);
+
+        float transformX =
+            invDet * (player.dirY * dx - player.dirX * dy);
+
+        float transformY =
+            invDet * (-player.planeY * dx + player.planeX * dy);
+
+        if (transformY <= 0) continue;
+
+        int screenX = (int)((W / 2) * (1 + transformX / transformY));
+
+        int size = (int)(H / transformY);
+
+        for (int y = -size/2 + H/2; y < size/2 + H/2; y++) {
+
+            if (y < 0 || y >= H) continue;
+            if (screenX < 0 || screenX >= W) continue;
+            if (transformY >= zbuffer[screenX]) continue;
+
+            screen[screenX][y] = (pickups[i].type == 0) ? '+' : '*';
+        }
+    }
+}
+// =============================
+// Wolf3D CLI - Part 8
+// MAX升级层（重构优化版）
+// =============================
+
+#include <time.h>
+
+// =============================
+// 武器系统（重构）
+// =============================
+
+typedef enum {
+    WEAPON_PISTOL,
+    WEAPON_SHOTGUN
+} WeaponType;
+
+static WeaponType currentWeapon = WEAPON_PISTOL;
+
+static float shootCD = 0.0f;
+
+static void switchWeapon() {
+    if (key['1']) currentWeapon = WEAPON_PISTOL;
+    if (key['2']) currentWeapon = WEAPON_SHOTGUN;
+}
+
+// =============================
+// 子弹结构优化（穿透+伤害）
+// =============================
+
+typedef struct {
+    float x, y, dx, dy;
+    int active;
+    int damage;
+    int pierce;
+} BulletV2;
+
+static BulletV2 bulletsV2[MAX_BULLET];
+
+// =============================
+// 初始化子弹系统
+// =============================
+
+static void initBulletsV2() {
+    for (int i = 0; i < MAX_BULLET; i++)
+        bulletsV2[i].active = 0;
+}
+
+// =============================
+// 发射子弹（统一接口）
+// =============================
+
+static void spawnBulletV2(float dx, float dy, int dmg) {
+    for (int i = 0; i < MAX_BULLET; i++) {
+        if (!bulletsV2[i].active) {
+            bulletsV2[i].x = player.x;
+            bulletsV2[i].y = player.y;
+            bulletsV2[i].dx = dx;
+            bulletsV2[i].dy = dy;
+            bulletsV2[i].damage = dmg;
+            bulletsV2[i].pierce = 1;
+            bulletsV2[i].active = 1;
+            break;
+        }
+    }
+}
+
+// =============================
+// 霰弹枪（真实扩散）
+// =============================
+
+static void shotgunFire() {
+    for (int i = 0; i < 7; i++) {
+        float a = ((rand() % 100) / 100.0f - 0.5f) * 0.6f;
+
+        float dx = player.dirX * cosf(a) - player.dirY * sinf(a);
+        float dy = player.dirX * sinf(a) + player.dirY * cosf(a);
+
+        spawnBulletV2(dx, dy, 1);
+    }
+}
+
+// =============================
+// 射击控制（冷却+武器）
+// =============================
+
+static void fireWeapon(float dt) {
+    shootCD -= dt;
+    if (!key[' '] || shootCD > 0) return;
+
+    if (ammo <= 0) return;
+
+    if (currentWeapon == WEAPON_PISTOL) {
+        spawnBulletV2(player.dirX, player.dirY, 1);
+        ammo--;
+        shootCD = 0.25f;
+    } else {
+        shotgunFire();
+        ammo--;
+        shootCD = 0.6f;
+    }
+
+    key[' '] = 0;
+}
+
+// =============================
+// 子弹更新（穿透+伤害）
+// =============================
+
+static void updateBulletsV2(float dt) {
+    for (int i = 0; i < MAX_BULLET; i++) {
+        if (!bulletsV2[i].active) continue;
+
+        bulletsV2[i].x += bulletsV2[i].dx * 12.0f * dt;
+        bulletsV2[i].y += bulletsV2[i].dy * 12.0f * dt;
+
+        int mx = (int)bulletsV2[i].x;
+        int my = (int)bulletsV2[i].y;
+
+        if (isWall(mx, my)) {
+            bulletsV2[i].active = 0;
+            continue;
+        }
+
+        for (int e = 0; e < MAX_ENEMY; e++) {
+            if (!enemies[e].alive) continue;
+
+            float dx = bulletsV2[i].x - enemies[e].x;
+            float dy = bulletsV2[i].y - enemies[e].y;
+
+            if (dx*dx + dy*dy < 0.25f) {
+                enemies[e].hp -= bulletsV2[i].damage;
+
+                if (enemies[e].hp <= 0)
+                    enemies[e].alive = 0;
+
+                if (--bulletsV2[i].pierce <= 0)
+                    bulletsV2[i].active = 0;
+            }
+        }
+    }
+}
+
+// =============================
+// 敌人增强AI（状态+攻击间隔）
+// =============================
+
+static float enemyAtkCD[MAX_ENEMY];
+
+static void updateEnemyAI_V2(float dt) {
+    for (int i = 0; i < MAX_ENEMY; i++) {
+        if (!enemies[i].alive) continue;
+
+        enemyAtkCD[i] -= dt;
+
+        float dx = player.x - enemies[i].x;
+        float dy = player.y - enemies[i].y;
+        float d2 = dx*dx + dy*dy;
+
+        if (d2 < 20.0f) {
+            float len = sqrtf(d2) + 0.0001f;
+            enemies[i].x += dx / len * dt * 1.5f;
+            enemies[i].y += dy / len * dt * 1.5f;
+        }
+
+        if (d2 < 1.2f && enemyAtkCD[i] <= 0) {
+            player.hp -= 5;
+            enemyAtkCD[i] = 0.8f;
+        }
+    }
+}
+
+// =============================
+// 轻量死亡动画（优化版）
+// =============================
+
+static void updateEnemyDeathV2() {
+    for (int i = 0; i < MAX_ENEMY; i++) {
+        if (enemies[i].alive) continue;
+
+        enemies[i].hp--;
+
+        if (enemies[i].hp < -20) {
+            enemies[i].x = -100;
+            enemies[i].y = -100;
+        }
+    }
+}
+
+// =============================
+// HUD升级（武器显示）
+// =============================
+
+static void renderHUDV2() {
+    char buf[128];
+
+    snprintf(buf, sizeof(buf),
+        "HP:%d Ammo:%d Weapon:%s Score:%d",
+        player.hp,
+        ammo,
+        currentWeapon == WEAPON_PISTOL ? "PISTOL" : "SHOTGUN",
+        score
+    );
+
+    for (int i = 0; i < W && buf[i]; i++)
+        screen[i][H - 1] = buf[i];
+}
+
+// =============================
+// 小地图优化（视野方向）
+// =============================
+
+static void renderMinimapV2() {
+    int s = 11;
+
+    for (int y = 0; y < s; y++) {
+        for (int x = 0; x < s; x++) {
+
+            int mx = (int)player.x + x - s/2;
+            int my = (int)player.y + y - s/2;
+
+            char c = '.';
+
+            if (mx >= 0 && my >= 0 && mx < MAP_W && my < MAP_H)
+                c = worldMap[mx][my] ? '#' : '.';
+
+            screen[x][y] = c;
+        }
+    }
+
+    screen[s/2][s/2] = '@';
+
+    screen[s/2 + (int)(player.dirX*2)][s/2 + (int)(player.dirY*2)] = '>';
+}
+
+// =============================
+// 主更新（最终统一入口）
+// =============================
+
+static void updateV3(float dt) {
+
+    movePlayer(dt);
+    rotatePlayer(dt);
+
+    switchWeapon();
+    fireWeapon(dt);
+
+    updateBulletsV2(dt);
+    updateEnemyAI_V2(dt);
+    updateEnemyDeathV2();
+
+    updatePickups();
+    updateDoors(dt);
+
+    handleInput(dt);
+}
+
+// =============================
+// 主渲染（最终统一入口）
+// =============================
+
+static void renderV3() {
+
+    clearBuffer();
+
+    renderWallsV2();
+    renderFloorCeil();
+
+    renderEnemies();
+    renderPickups();
+    renderMinimapV2();
+
+    renderHUDV2();
+    renderDebug();
+
+    present();
+}
+// =============================
+// Wolf3D CLI - Part 9
+// 引擎重构层（稳定架构）
+// =============================
+
+#include <time.h>
+
+// =============================
+// 游戏状态管理
+// =============================
+
+typedef enum {
+    STATE_RUNNING,
+    STATE_PAUSED,
+    STATE_EXIT
+} GameState;
+
+static GameState gameState = STATE_RUNNING;
+
+// =============================
+// 统一更新接口（模块化）
+// =============================
+
+static void updatePlayer(float dt) {
+    movePlayer(dt);
+    rotatePlayer(dt);
+}
+
+// =============================
+// 统一输入处理（合并防止冲突）
+// =============================
+
+static void processInput(float dt) {
+
+    if (key[27]) { // ESC
+        gameState = STATE_EXIT;
         return;
     }
 
-    if ((unsigned char)c < 512) keyState[(unsigned char)c] = 1;
+    if (key['p']) {
+        gameState = STATE_PAUSED;
+        key['p'] = 0;
+    }
+
+    if (key['c']) {
+        gameState = STATE_RUNNING;
+        key['c'] = 0;
+    }
+
+    if (gameState != STATE_RUNNING) return;
+
+    handleBetterInput(dt);
+    handleInput(dt);
 }
 
-void clearKeyState() {
-    memset(keyState, 0, sizeof(keyState));
+// =============================
+// 统一实体更新顺序（关键优化）
+// =============================
+
+static void updateEntities(float dt) {
+
+    updatePlayer(dt);
+
+    updateBulletsV2(dt);
+    updateEnemyAI_V2(dt);
+    updateEnemyDeathV2();
+
+    updatePickups();
+    updateDoors(dt);
+
+    bulletHitTest();
 }
 
-void initMouse() {
-    #ifdef __linux__
-    mouseFd = open("/dev/input/mice", O_RDONLY | O_NONBLOCK);
-    #endif
+// =============================
+// 逻辑层总控
+// =============================
+
+static void updateWorld(float dt) {
+
+    if (gameState != STATE_RUNNING) return;
+
+    processInput(dt);
+    updateEntities(dt);
 }
 
-void updateMouse(float *rotDelta) {
-    if (mouseFd < 0) return;
+// =============================
+// 渲染层拆分（更清晰流水线）
+// =============================
 
-    signed char data[3];
-    ssize_t n = read(mouseFd, data, sizeof(data));
-    if (n == 3) {
-        int dx = data[1];
-        *rotDelta += dx * settings.mouseSensitivity;
+static void renderWorld() {
+
+    renderWallsV2();
+    renderFloorCeil();
+}
+
+static void renderEntitiesLayer() {
+
+    renderEnemies();
+    renderPickups();
+    renderMinimapV2();
+}
+
+static void renderUI() {
+
+    renderHUDV2();
+    renderDebug();
+}
+
+// =============================
+// 渲染总控（统一入口）
+// =============================
+
+static void renderFrameV4() {
+
+    clearBuffer();
+
+    renderWorld();
+    renderEntitiesLayer();
+    renderUI();
+
+    present();
+}
+
+// =============================
+// 时间稳定器（避免帧爆炸）
+// =============================
+
+static float clampDelta(float dt) {
+    if (dt > 0.05f) return 0.05f;
+    return dt;
+}
+
+// =============================
+// 主循环升级（最终结构）
+// =============================
+
+int main() {
+
+    srand(time(NULL));
+
+    initEngine();
+    initEntities();
+    initPickups();
+    generateMap();
+    initBulletsV2();
+
+    while (gameState != STATE_EXIT) {
+
+        float dt = clampDelta(getDeltaTime());
+
+        updateInput();
+        updateWorld(dt);
+        renderFrameV4();
+
+        clearInput();
+        usleep(16000);
+    }
+
+    disableRaw();
+    clearScreen();
+
+    return 0;
+}
+// =============================
+// Wolf3D CLI - PART 10
+// 最终版本（完整游戏）
+// =============================
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <unistd.h>
+#include <termios.h>
+#include <sys/time.h>
+#include <time.h>
+
+// =============================
+// CONFIG
+// =============================
+
+#define W 80
+#define H 40
+#define MAP_W 24
+#define MAP_H 24
+
+#define MAX_ENEMY 32
+#define MAX_BULLET 64
+
+// =============================
+// GAME STATE
+// =============================
+
+typedef enum {
+    STATE_MENU,
+    STATE_PLAY,
+    STATE_WIN,
+    STATE_LOSE
+} GameState;
+
+static GameState state = STATE_MENU;
+
+// =============================
+// INPUT
+// =============================
+
+static int key[512];
+
+// =============================
+// TERMINAL
+// =============================
+
+static struct termios orig;
+
+static void disableRaw() {
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig);
+}
+
+static void enableRaw() {
+    tcgetattr(STDIN_FILENO, &orig);
+    atexit(disableRaw);
+
+    struct termios raw = orig;
+    raw.c_lflag &= ~(ECHO | ICANON | ISIG);
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 0;
+
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+}
+
+static void clearScreen() {
+    printf("\033[2J\033[H");
+}
+
+// =============================
+// TIME
+// =============================
+
+static struct timeval lastTime;
+
+static float dt() {
+    struct timeval n;
+    gettimeofday(&n,NULL);
+
+    float d =
+        (n.tv_sec-lastTime.tv_sec)+
+        (n.tv_usec-lastTime.tv_usec)/1000000.0f;
+
+    lastTime=n;
+    return d>0.05f?0.05f:d;
+}
+
+// =============================
+// MAP
+// =============================
+
+static int map[MAP_W][MAP_H];
+
+static void genMap() {
+    for(int y=0;y<MAP_H;y++)
+    for(int x=0;x<MAP_W;x++)
+        map[x][y]=(x==0||y==0||x==MAP_W-1||y==MAP_H-1)?1:(rand()%100<15);
+}
+
+static int wall(int x,int y){
+    if(x<0||y<0||x>=MAP_W||y>=MAP_H)return 1;
+    return map[x][y];
+}
+
+// =============================
+// PLAYER
+// =============================
+
+typedef struct {
+    float x,y,dx,dy,px,py;
+    int hp;
+    int ammo;
+    int score;
+} Player;
+
+static Player p;
+
+// =============================
+// ENEMY
+// =============================
+
+typedef struct {
+    float x,y;
+    int hp;
+    int alive;
+} Enemy;
+
+static Enemy e[MAX_ENEMY];
+
+// =============================
+// BULLET
+// =============================
+
+typedef struct {
+    float x,y,dx,dy;
+    int active;
+} Bullet;
+
+static Bullet b[MAX_BULLET];
+
+// =============================
+// BUFFER
+// =============================
+
+static char scr[W][H];
+static float zbuf[W];
+
+// =============================
+// INIT
+// =============================
+
+static void initPlayer(){
+    p.x=3;p.y=3;
+    p.dx=-1;p.dy=0;
+    p.px=0;p.py=0.66;
+    p.hp=100;
+    p.ammo=20;
+    p.score=0;
+}
+
+static void initEnemy(){
+    for(int i=0;i<MAX_ENEMY;i++){
+        e[i].x=5+i;
+        e[i].y=5;
+        e[i].hp=3;
+        e[i].alive=1;
     }
 }
 
-/* ---------- 菜单渲染 ---------- */
-void renderMenu(char screenChar[SCREEN_HEIGHT][SCREEN_WIDTH],
-                int  screenColor[SCREEN_HEIGHT][SCREEN_WIDTH]) {
-    /* 清屏 */
-    for (int y = 0; y < SCREEN_HEIGHT; y++) {
-        for (int x = 0; x < SCREEN_WIDTH; x++) {
-            screenChar[y][x] = ' ';
-            screenColor[y][x] = 0;
+static void initBullet(){
+    for(int i=0;i<MAX_BULLET;i++)
+        b[i].active=0;
+}
+
+// =============================
+// INPUT
+// =============================
+
+static void readInput(){
+    char c;
+    while(read(0,&c,1)==1)
+        key[(int)c]=1;
+}
+
+static void clearInput(){
+    memset(key,0,sizeof(key));
+}
+
+// =============================
+// MOVEMENT
+// =============================
+
+static void move(float dt){
+    float m=0;
+    if(key['w'])m=1;
+    if(key['s'])m=-1;
+
+    float nx=p.x+p.dx*m*5*dt;
+    float ny=p.y+p.dy*m*5*dt;
+
+    if(!wall(nx,p.y))p.x=nx;
+    if(!wall(p.x,ny))p.y=ny;
+}
+
+static void rot(float dt){
+    float r=0;
+    if(key['a'])r=1;
+    if(key['d'])r=-1;
+
+    float a=r*2.5f*dt;
+
+    float ox=p.dx;
+    p.dx=p.dx*cosf(a)-p.dy*sinf(a);
+    p.dy=ox*sinf(a)+p.dy*cosf(a);
+
+    float op=p.px;
+    p.px=p.px*cosf(a)-p.py*sinf(a);
+    p.py=op*sinf(a)+p.py*cosf(a);
+}
+
+// =============================
+// RAYCAST
+// =============================
+
+static float ray(float rx,float ry,int *s){
+    int mx=p.x,my=p.y;
+
+    float ddx=fabsf(1/(rx?rx:0.0001f));
+    float ddy=fabsf(1/(ry?ry:0.0001f));
+
+    int sx,sy;
+    float sdx,sdy;
+
+    if(rx<0){sx=-1;sdx=(p.x-mx)*ddx;}
+    else {sx=1;sdx=(mx+1-p.x)*ddx;}
+
+    if(ry<0){sy=-1;sdy=(p.y-my)*ddy;}
+    else {sy=1;sdy=(my+1-p.y)*ddy;}
+
+    int hit=0,side=0;
+
+    while(!hit){
+        if(sdx<sdy){sdx+=ddx;mx+=sx;side=0;}
+        else {sdy+=ddy;my+=sy;side=1;}
+        if(wall(mx,my))hit=1;
+    }
+
+    *s=side;
+    return side? sdy-ddy : sdx-ddx;
+}
+
+// =============================
+// SHOOT
+// =============================
+
+static void shoot(){
+    if(!p.ammo)return;
+
+    for(int i=0;i<MAX_BULLET;i++){
+        if(!b[i].active){
+            b[i].x=p.x;
+            b[i].y=p.y;
+            b[i].dx=p.dx;
+            b[i].dy=p.dy;
+            b[i].active=1;
+            p.ammo--;
+            break;
+        }
+    }
+}
+
+// =============================
+// UPDATE BULLETS
+// =============================
+
+static void updateB(float dt){
+    for(int i=0;i<MAX_BULLET;i++){
+        if(!b[i].active)continue;
+
+        b[i].x+=b[i].dx*10*dt;
+        b[i].y+=b[i].dy*10*dt;
+
+        if(wall(b[i].x,b[i].y))
+            b[i].active=0;
+    }
+}
+
+// =============================
+// ENEMY AI + WIN CHECK
+// =============================
+
+static void updateE(float dt){
+    int alive=0;
+
+    for(int i=0;i<MAX_ENEMY;i++){
+        if(!e[i].alive)continue;
+
+        alive++;
+
+        float dx=p.x-e[i].x;
+        float dy=p.y-e[i].y;
+        float l=sqrtf(dx*dx+dy*dy)+0.0001f;
+
+        e[i].x+=dx/l*dt*1.2f;
+        e[i].y+=dy/l*dt*1.2f;
+
+        if(l<1.2f){
+            p.hp-=5;
+            if(p.hp<=0)state=STATE_LOSE;
         }
     }
 
-    int centerX = SCREEN_WIDTH / 2;
-    int centerY = SCREEN_HEIGHT / 2;
+    if(alive==0)
+        state=STATE_WIN;
+}
 
-    if (menuState == MENU_MAIN) {
-        const char *title = "=== WOLF3D CLI ===";
-        const char *options[] = {"Start Game", "Settings", "Quit"};
-        int optCount = 3;
+// =============================
+// COLLISION
+// =============================
 
-        int titleX = centerX - strlen(title) / 2;
-        for (int i = 0; title[i] && titleX + i < SCREEN_WIDTH; i++) {
-            screenChar[centerY - 6][titleX + i] = title[i];
-            screenColor[centerY - 6][titleX + i] = 220;
-        }
+static void hit(){
+    for(int i=0;i<MAX_BULLET;i++){
+        if(!b[i].active)continue;
 
-        for (int i = 0; i < optCount; i++) {
-            int x = centerX - strlen(options[i]) / 2;
-            int y = centerY - 2 + i * 2;
-            if (y >= 0 && y < SCREEN_HEIGHT) {
-                if (menuSelection == i && x-2 >= 0) {
-                    screenChar[y][x - 2] = '>';
-                    screenColor[y][x - 2] = 46;
+        for(int j=0;j<MAX_ENEMY;j++){
+            if(!e[j].alive)continue;
+
+            float dx=b[i].x-e[j].x;
+            float dy=b[i].y-e[j].y;
+
+            if(dx*dx+dy*dy<0.3f){
+                e[j].hp--;
+                b[i].active=0;
+                if(e[j].hp<=0){
+                    e[j].alive=0;
+                    p.score+=10;
                 }
-                for (int j = 0; options[i][j] && x + j < SCREEN_WIDTH; j++) {
-                    screenChar[y][x + j] = options[i][j];
-                    screenColor[y][x + j] = (menuSelection == i) ? 46 : 255;
-                }
-            }
-        }
-
-        const char *controls = "Use W/S to navigate, ENTER to select";
-        int ctrlX = centerX - strlen(controls) / 2;
-        int ctrlY = centerY + 8;
-        if (ctrlY < SCREEN_HEIGHT) {
-            for (int i = 0; controls[i] && ctrlX + i < SCREEN_WIDTH; i++) {
-                screenChar[ctrlY][ctrlX + i] = controls[i];
-                screenColor[ctrlY][ctrlX + i] = 240;
             }
         }
     }
-    else if (menuState == MENU_SETTINGS) {
-        const char *title = "=== SETTINGS ===";
-        char options[4][32];
-        snprintf(options[0], 32, "Mouse Sensitivity: %.3f", settings.mouseSensitivity);
-        snprintf(options[1], 32, "Show FPS: %s", settings.showFPS ? "ON" : "OFF");
-        snprintf(options[2], 32, "Show Minimap: %s", settings.showMinimap ? "ON" : "OFF");
-        snprintf(options[3], 32, "Show Crosshair: %s", settings.showCrosshair ? "ON" : "OFF");
-        int optCount = 4;
+}
 
-        int titleX = centerX - strlen(title) / 2;
-        for (int i = 0; title[i] && titleX + i < SCREEN_WIDTH; i++) {
-            screenChar[centerY - 6][titleX + i] = title[i];
-            screenColor[centerY - 6][titleX + i] = 220;
-        }
+// =============================
+// RENDER
+// =============================
 
-        for (int i = 0; i < optCount; i++) {
-            int x = centerX - strlen(options[i]) / 2;
-            int y = centerY - 2 + i * 2;
-            if (y >= 0 && y < SCREEN_HEIGHT) {
-                if (menuSelection == i && x-2 >= 0) {
-                    screenChar[y][x - 2] = '>';
-                    screenColor[y][x - 2] = 46;
-                }
-                for (int j = 0; options[i][j] && x + j < SCREEN_WIDTH; j++) {
-                    screenChar[y][x + j] = options[i][j];
-                    screenColor[y][x + j] = (menuSelection == i) ? 46 : 255;
-                }
-            }
-        }
+static void clr(){
+    for(int y=0;y<H;y++)
+    for(int x=0;x<W;x++)
+        scr[x][y]=' ';
+}
 
-        const char *controls = "W/S: Navigate, +/-: Adjust, ESC: Back";
-        int ctrlX = centerX - strlen(controls) / 2;
-        int ctrlY = centerY + 8;
-        if (ctrlY < SCREEN_HEIGHT) {
-            for (int i = 0; controls[i] && ctrlX + i < SCREEN_WIDTH; i++) {
-                screenChar[ctrlY][ctrlX + i] = controls[i];
-                screenColor[ctrlY][ctrlX + i] = 240;
-            }
+static void walls(){
+    for(int x=0;x<W;x++){
+        float c=2*x/(float)W-1;
+        float rx=p.dx+p.px*c;
+        float ry=p.dy+p.py*c;
+
+        int s;
+        float d=ray(rx,ry,&s);
+        zbuf[x]=d;
+
+        int h=H/(d+0.0001f);
+        int a=-h/2+H/2;
+        int b=h/2+H/2;
+
+        if(a<0)a=0;
+        if(b>=H)b=H-1;
+
+        for(int y=a;y<=b;y++)
+            scr[x][y]=s?'|':'#';
+    }
+}
+
+// =============================
+// DRAW ENEMIES
+// =============================
+
+static void drawE(){
+    for(int i=0;i<MAX_ENEMY;i++){
+        if(!e[i].alive)continue;
+
+        float dx=e[i].x-p.x;
+        float dy=e[i].y-p.y;
+
+        float inv=1.0f/(p.px*p.dy-p.dx*p.py);
+
+        float tx=inv*(p.dy*dx-p.dx*dy);
+        float ty=inv*(-p.py*dx+p.px*dy);
+
+        if(ty<=0)continue;
+
+        int sx=(W/2)*(1+tx/ty);
+        int sz=H/ty;
+
+        for(int y=-sz/2+H/2;y<sz/2+H/2;y++){
+            if(y<0||y>=H)continue;
+            if(sx<0||sx>=W)continue;
+            scr[sx][y]='E';
         }
     }
-                }
+}
 
-                /* ---------- 迷你地图 ---------- */
-                void drawMinimap(char screenChar[SCREEN_HEIGHT][SCREEN_WIDTH],
-                                 int  screenColor[SCREEN_HEIGHT][SCREEN_WIDTH]) {
-                    if (!settings.showMinimap) return;
+// =============================
+// UI
+// =============================
 
-                    int mapW = 20;
-                    int mapH = 12;  /* 减小高度 */
-                    int startX = SCREEN_WIDTH - mapW - 2;
-                    int startY = 2;
+static void ui(){
+    char buf[128];
 
-                    if (startX < 0 || startY + mapH >= SCREEN_HEIGHT) return;
+    snprintf(buf,sizeof(buf),
+        "HP:%d Ammo:%d Score:%d",
+        p.hp,p.ammo,p.score);
 
-                    /* 边框 */
-                    for (int i = 0; i <= mapW && startX + i < SCREEN_WIDTH; i++) {
-                        if (startY >= 0 && startY < SCREEN_HEIGHT) {
-                            screenChar[startY][startX + i] = '-';
-                            screenColor[startY][startX + i] = 240;
-                        }
-                        if (startY + mapH >= 0 && startY + mapH < SCREEN_HEIGHT) {
-                            screenChar[startY + mapH][startX + i] = '-';
-                            screenColor[startY + mapH][startX + i] = 240;
-                        }
-                    }
-                    for (int i = 0; i <= mapH && startY + i < SCREEN_HEIGHT; i++) {
-                        if (startX >= 0 && startX < SCREEN_WIDTH) {
-                            screenChar[startY + i][startX] = '|';
-                            screenColor[startY + i][startX] = 240;
-                        }
-                        if (startX + mapW >= 0 && startX + mapW < SCREEN_WIDTH) {
-                            screenChar[startY + i][startX + mapW] = '|';
-                            screenColor[startY + i][startX + mapW] = 240;
-                        }
-                    }
+    for(int i=0;i<W&&buf[i];i++)
+        scr[i][H-1]=buf[i];
+}
 
-                    /* 绘制地图 */
-                    for (int y = 0; y < mapH; y++) {
-                        for (int x = 0; x < mapW; x++) {
-                            int mapX = (int)(posX - mapW/2 + x);
-                            int mapY = (int)(posY - mapH/2 + y);
-                            if (mapX >= 0 && mapX < MAP_WIDTH && mapY >= 0 && mapY < MAP_HEIGHT) {
-                                int px = startX + x;
-                                int py = startY + y;
-                                if (px >= 0 && px < SCREEN_WIDTH && py >= 0 && py < SCREEN_HEIGHT) {
-                                    if (worldMap[mapY][mapX] > 0) {
-                                        screenChar[py][px] = '#';
-                                        screenColor[py][px] = 130;
-                                    } else {
-                                        screenChar[py][px] = '.';
-                                        screenColor[py][px] = 235;
-                                    }
-                                }
-                            }
-                        }
-                    }
+// =============================
+// SCREEN
+// =============================
 
-                    /* 绘制玩家位置 */
-                    int playerMapX = mapW/2;
-                    int playerMapY = mapH/2;
-                    int px = startX + playerMapX;
-                    int py = startY + playerMapY;
-                    if (px >= 0 && px < SCREEN_WIDTH && py >= 0 && py < SCREEN_HEIGHT) {
-                        screenChar[py][px] = '@';
-                        screenColor[py][px] = 46;
-                    }
+static void show(){
+    printf("\033[H");
+    for(int y=0;y<H;y++){
+        for(int x=0;x<W;x++)
+            putchar(scr[x][y]);
+        putchar('\n');
+    }
+}
 
-                    /* 标题 */
-                    const char *title = "MINIMAP";
-                    for (int i = 0; title[i] && startX + 2 + i < SCREEN_WIDTH; i++) {
-                        if (startY - 1 >= 0) {
-                            screenChar[startY - 1][startX + 2 + i] = title[i];
-                            screenColor[startY - 1][startX + 2 + i] = 220;
-                        }
-                    }
-                                 }
+// =============================
+// MAIN
+// =============================
 
-                                 /* ---------- 渲染核心 ---------- */
-                                 void precomputeRays() {
-                                     for (int x = 0; x < SCREEN_WIDTH; x++) {
-                                         cachedCameraX[x] = 2.0f * x / (float)SCREEN_WIDTH - 1.0f;
-                                         cachedRayDirX[x] = dirX + planeX * cachedCameraX[x];
-                                         cachedRayDirY[x] = dirY + planeY * cachedCameraX[x];
-                                     }
-                                 }
+int main(){
+    srand(time(NULL));
 
-                                 void renderFrame(char screenChar[SCREEN_HEIGHT][SCREEN_WIDTH],
-                                                  int  screenColor[SCREEN_HEIGHT][SCREEN_WIDTH]) {
-                                     precomputeRays();
+    enableRaw();
+    clearScreen();
 
-                                     /* 墙壁光线投射 */
-                                     for (int x = 0; x < SCREEN_WIDTH; x++) {
-                                         float rayDirX = cachedRayDirX[x];
-                                         float rayDirY = cachedRayDirY[x];
+    genMap();
+    initPlayer();
+    initEnemy();
+    initBullet();
 
-                                         int mapX = (int)posX;
-                                         int mapY = (int)posY;
+    gettimeofday(&lastTime,NULL);
 
-                                         float deltaDistX = fabs(1.0f / rayDirX);
-                                         float deltaDistY = fabs(1.0f / rayDirY);
+    while(state!=STATE_EXIT){
 
-                                         int stepX, stepY;
-                                         float sideDistX, sideDistY;
-                                         if (rayDirX < 0) {
-                                             stepX = -1;
-                                             sideDistX = (posX - mapX) * deltaDistX;
-                                         } else {
-                                             stepX = 1;
-                                             sideDistX = (mapX + 1.0f - posX) * deltaDistX;
-                                         }
-                                         if (rayDirY < 0) {
-                                             stepY = -1;
-                                             sideDistY = (posY - mapY) * deltaDistY;
-                                         } else {
-                                             stepY = 1;
-                                             sideDistY = (mapY + 1.0f - posY) * deltaDistY;
-                                         }
+        float dt=dt();
 
-                                         int hit = 0, side = 0;
-                                         while (!hit) {
-                                             if (sideDistX < sideDistY) {
-                                                 sideDistX += deltaDistX;
-                                                 mapX += stepX;
-                                                 side = 0;
-                                             } else {
-                                                 sideDistY += deltaDistY;
-                                                 mapY += stepY;
-                                                 side = 1;
-                                             }
-                                             if (mapX >= 0 && mapX < MAP_WIDTH && mapY >= 0 && mapY < MAP_HEIGHT) {
-                                                 if (worldMap[mapY][mapX] > 0) hit = 1;
-                                             } else {
-                                                 hit = 1; /* 边界视为墙 */
-                                             }
-                                             if (fabs(mapX - posX) + fabs(mapY - posY) > RENDER_DEPTH) break;
-                                         }
+        readInput();
 
-                                         float perpWallDist;
-                                         if (side == 0)
-                                             perpWallDist = (sideDistX - deltaDistX);
-                                         else
-                                             perpWallDist = (sideDistY - deltaDistY);
-                                         if (perpWallDist < 0.01f) perpWallDist = 0.01f;
+        if(state==STATE_MENU){
+            if(key[' ']) state=STATE_PLAY;
+        }
 
-                                         float texX;
-                                         if (side == 0)
-                                             texX = posY + rayDirY * perpWallDist - floor(posY + rayDirY * perpWallDist);
-                                         else
-                                             texX = posX + rayDirX * perpWallDist - floor(posX + rayDirX * perpWallDist);
+        if(state==STATE_PLAY){
+            move(dt);
+            rot(dt);
 
-                                         wallDist[x] = perpWallDist;
-                                         wallSide[x] = side;
-                                         wallTexX[x] = texX;
+            if(key[' ']){shoot();key[' ']=0;}
 
-                                         int mat = 1;
-                                         if (mapX >= 0 && mapX < MAP_WIDTH && mapY >= 0 && mapY < MAP_HEIGHT) {
-                                             mat = worldMap[mapY][mapX];
-                                         }
-                                         if (mat < 1 || mat > 3) mat = 1;
-                                         wallMat[x] = mat;
+            updateB(dt);
+            updateE(dt);
+            hit();
 
-                                         int lineHeight = (int)(SCREEN_HEIGHT / perpWallDist);
-                                         if (lineHeight > SCREEN_HEIGHT) lineHeight = SCREEN_HEIGHT;
-                                         int drawStart = (SCREEN_HEIGHT - lineHeight) / 2;
-                                         if (drawStart < 0) drawStart = 0;
-                                         int drawEnd = drawStart + lineHeight;
-                                         if (drawEnd >= SCREEN_HEIGHT) drawEnd = SCREEN_HEIGHT - 1;
-                                         wallDrawStart[x] = drawStart;
-                                         wallDrawEnd[x] = drawEnd;
-                                     }
+            clr();
+            walls();
+            drawE();
+            ui();
+        }
 
-                                     /* 填充像素 */
-                                     for (int y = 0; y < SCREEN_HEIGHT; y++) {
-                                         for (int x = 0; x < SCREEN_WIDTH; x++) {
-                                             if (y >= wallDrawStart[x] && y <= wallDrawEnd[x]) {
-                                                 int mat = wallMat[x];
-                                                 int idx = (int)(wallTexX[x] * 7.9f);
-                                                 if (idx < 0) idx = 0;
-                                                 if (idx > 7) idx = 7;
-                                                 screenChar[y][x] = texChars[mat][idx];
-                                                 screenColor[y][x] = texColors[mat];
-                                             } else if (y < wallDrawStart[x]) {
-                                                 screenChar[y][x] = ' ';
-                                                 screenColor[y][x] = CEIL_COLOR;
-                                             } else {
-                                                 screenChar[y][x] = '.';
-                                                 screenColor[y][x] = FLOOR_COLOR;
-                                             }
-                                         }
-                                     }
+        if(state==STATE_WIN){
+            printf("\033[HYOU WIN!\nScore:%d\n",p.score);
+            break;
+        }
 
-                                     /* 准星 */
-                                     if (settings.showCrosshair) {
-                                         int cx = SCREEN_WIDTH / 2;
-                                         int cy = SCREEN_HEIGHT / 2;
-                                         if (cx >= 0 && cx < SCREEN_WIDTH && cy >= 0 && cy < SCREEN_HEIGHT) {
-                                             screenChar[cy][cx] = '+';
-                                             screenColor[cy][cx] = 46;
-                                             if (cy > 0) { screenChar[cy-1][cx] = '|'; screenColor[cy-1][cx] = 46; }
-                                             if (cy < SCREEN_HEIGHT-1) { screenChar[cy+1][cx] = '|'; screenColor[cy+1][cx] = 46; }
-                                             if (cx > 0) { screenChar[cy][cx-1] = '-'; screenColor[cy][cx-1] = 46; }
-                                             if (cx < SCREEN_WIDTH-1) { screenChar[cy][cx+1] = '-'; screenColor[cy][cx+1] = 46; }
-                                         }
-                                     }
+        if(state==STATE_LOSE){
+            printf("\033[HYOU LOSE!\nScore:%d\n",p.score);
+            break;
+        }
 
-                                     /* 帧率显示 */
-                                     if (settings.showFPS) {
-                                         char fpsStr[16];
-                                         snprintf(fpsStr, sizeof(fpsStr), "FPS: %.0f", fps);
-                                         int len = strlen(fpsStr);
-                                         for (int i = 0; i < len && SCREEN_WIDTH - len + i < SCREEN_WIDTH; i++) {
-                                             screenChar[1][SCREEN_WIDTH - len + i] = fpsStr[i];
-                                             screenColor[1][SCREEN_WIDTH - len + i] = 46;
-                                         }
-                                     }
+        show();
+        clearInput();
+        usleep(16000);
+    }
 
-                                     /* 迷你地图 */
-                                     drawMinimap(screenChar, screenColor);
-
-                                     /* HUD信息 */
-                                     char info[64];
-                                     snprintf(info, sizeof(info), "Pos:%.0f,%.0f", posX, posY);
-                                     for (int i = 0; info[i] && i < SCREEN_WIDTH; i++) {
-                                         screenChar[0][i] = info[i];
-                                         screenColor[0][i] = 231;
-                                     }
-
-                                     char help[32] = "M:Menu ESC:Quit";
-                                     for (int i = 0; help[i] && i < SCREEN_WIDTH; i++) {
-                                         screenChar[SCREEN_HEIGHT-1][i] = help[i];
-                                         screenColor[SCREEN_HEIGHT-1][i] = 240;
-                                     }
-                                                  }
-
-                                                  void presentBuffer(char screenChar[SCREEN_HEIGHT][SCREEN_WIDTH],
-                                                                     int  screenColor[SCREEN_HEIGHT][SCREEN_WIDTH]) {
-                                                      printf("\033[H");
-                                                      for (int y = 0; y < SCREEN_HEIGHT; y++) {
-                                                          int lastColor = -1;
-                                                          for (int x = 0; x < SCREEN_WIDTH; x++) {
-                                                              if (screenColor[y][x] != lastColor) {
-                                                                  printf("\033[38;5;%dm", screenColor[y][x]);
-                                                                  lastColor = screenColor[y][x];
-                                                              }
-                                                              putchar(screenChar[y][x]);
-                                                          }
-                                                          if (y < SCREEN_HEIGHT - 1) putchar('\n');
-                                                      }
-                                                      fflush(stdout);
-                                                                     }
-
-                                                                     /* 更新帧率 */
-                                                                     void updateFPS() {
-                                                                         frameCount++;
-                                                                         struct timeval now;
-                                                                         gettimeofday(&now, NULL);
-                                                                         float elapsed = (now.tv_sec - lastFPS.tv_sec) +
-                                                                         (now.tv_usec - lastFPS.tv_usec) / 1000000.0f;
-                                                                         if (elapsed >= 0.5f) {
-                                                                             fps = frameCount / elapsed;
-                                                                             frameCount = 0;
-                                                                             lastFPS = now;
-                                                                         }
-                                                                     }
-
-                                                                     /* ---------- 主循环 ---------- */
-                                                                     int main() {
-                                                                         enableRawMode();
-                                                                         prepareTerminal();
-                                                                         initMouse();
-
-                                                                         char screenChar[SCREEN_HEIGHT][SCREEN_WIDTH];
-                                                                         int  screenColor[SCREEN_HEIGHT][SCREEN_WIDTH];
-
-                                                                         int running = 1;
-                                                                         struct timespec lastTime, currentTime;
-                                                                         clock_gettime(CLOCK_MONOTONIC, &lastTime);
-                                                                         gettimeofday(&lastFPS, NULL);
-
-                                                                         while (running) {
-                                                                             clock_gettime(CLOCK_MONOTONIC, &currentTime);
-                                                                             float deltaTime = (currentTime.tv_sec - lastTime.tv_sec) +
-                                                                             (currentTime.tv_nsec - lastTime.tv_nsec) / 1e9f;
-                                                                             if (deltaTime > MAX_FRAME_TIME) deltaTime = MAX_FRAME_TIME;
-                                                                             lastTime = currentTime;
-
-                                                                             /* 输入更新 */
-                                                                             while (keyPressed()) {
-                                                                                 updateKeyState();
-                                                                             }
-
-                                                                             if (!inGame) {
-                                                                                 /* 菜单模式 */
-                                                                                 if (keyState['w'] || keyState['W'] || keyState[1000]) {
-                                                                                     menuSelection--;
-                                                                                     if (menuState == MENU_MAIN && menuSelection < 0) menuSelection = 2;
-                                                                                     if (menuState == MENU_SETTINGS && menuSelection < 0) menuSelection = 3;
-                                                                                     usleep(150000);
-                                                                                 }
-                                                                                 if (keyState['s'] || keyState['S'] || keyState[1001]) {
-                                                                                     menuSelection++;
-                                                                                     if (menuState == MENU_MAIN && menuSelection > 2) menuSelection = 0;
-                                                                                     if (menuState == MENU_SETTINGS && menuSelection > 3) menuSelection = 0;
-                                                                                     usleep(150000);
-                                                                                 }
-                                                                                 if (keyState['+'] || keyState['=']) {
-                                                                                     if (menuState == MENU_SETTINGS && menuSelection == 0) {
-                                                                                         settings.mouseSensitivity += 0.001f;
-                                                                                         if (settings.mouseSensitivity > 0.03f) settings.mouseSensitivity = 0.03f;
-                                                                                     }
-                                                                                     usleep(150000);
-                                                                                 }
-                                                                                 if (keyState['-'] || keyState['_']) {
-                                                                                     if (menuState == MENU_SETTINGS && menuSelection == 0) {
-                                                                                         settings.mouseSensitivity -= 0.001f;
-                                                                                         if (settings.mouseSensitivity < 0.001f) settings.mouseSensitivity = 0.001f;
-                                                                                     }
-                                                                                     usleep(150000);
-                                                                                 }
-                                                                                 if (keyState[' '] || keyState[10]) {
-                                                                                     if (menuState == MENU_MAIN) {
-                                                                                         if (menuSelection == 0) {
-                                                                                             inGame = 1;
-                                                                                             menuSelection = 0;
-                                                                                         } else if (menuSelection == 1) {
-                                                                                             menuState = MENU_SETTINGS;
-                                                                                             menuSelection = 0;
-                                                                                         } else if (menuSelection == 2) {
-                                                                                             running = 0;
-                                                                                         }
-                                                                                     } else if (menuState == MENU_SETTINGS) {
-                                                                                         if (menuSelection == 1) settings.showFPS = !settings.showFPS;
-                                                                                         else if (menuSelection == 2) settings.showMinimap = !settings.showMinimap;
-                                                                                         else if (menuSelection == 3) settings.showCrosshair = !settings.showCrosshair;
-                                                                                     }
-                                                                                     usleep(150000);
-                                                                                 }
-                                                                                 if (keyState[27] || keyState['q'] || keyState['Q']) {
-                                                                                     if (menuState == MENU_SETTINGS) {
-                                                                                         menuState = MENU_MAIN;
-                                                                                         menuSelection = 0;
-                                                                                     } else {
-                                                                                         running = 0;
-                                                                                     }
-                                                                                     usleep(150000);
-                                                                                 }
-
-                                                                                 renderMenu(screenChar, screenColor);
-                                                                                 presentBuffer(screenChar, screenColor);
-                                                                                 clearKeyState();
-                                                                                 usleep(50000);
-                                                                                 continue;
-                                                                             }
-
-                                                                             /* 游戏模式 */
-                                                                             float mouseRot = 0;
-                                                                             updateMouse(&mouseRot);
-
-                                                                             float moveForward = 0, moveStrafe = 0, rotDelta = 0;
-                                                                             if (keyState[keys.forward]) moveForward = 1;
-                                                                             if (keyState[keys.backward]) moveForward = -1;
-                                                                             if (keyState[keys.left]) moveStrafe = -1;
-                                                                             if (keyState[keys.right]) moveStrafe = 1;
-                                                                             if (keyState[keys.turnLeft]) rotDelta = ROT_SPEED * deltaTime;
-                                                                             if (keyState[keys.turnRight]) rotDelta = -ROT_SPEED * deltaTime;
-                                                                             if (keyState[keys.menu]) {
-                                                                                 inGame = 0;
-                                                                                 menuState = MENU_MAIN;
-                                                                                 menuSelection = 0;
-                                                                                 usleep(200000);
-                                                                             }
-                                                                             if (keyState[keys.quit]) running = 0;
-
-                                                                             rotDelta += mouseRot;
-
-                                                                             float moveStep = MOVE_SPEED * deltaTime / SUB_STEPS;
-                                                                             float dx = (dirX * moveForward + (-dirY) * moveStrafe) * moveStep;
-                                                                             float dy = (dirY * moveForward + (dirX) * moveStrafe) * moveStep;
-
-                                                                             float newX = posX, newY = posY;
-                                                                             for (int i = 0; i < SUB_STEPS; i++) {
-                                                                                 tryMove(dx, dy, &newX, &newY);
-                                                                             }
-                                                                             posX = newX;
-                                                                             posY = newY;
-
-                                                                             if (rotDelta != 0) {
-                                                                                 float oldDirX = dirX;
-                                                                                 dirX = dirX * cos(rotDelta) - dirY * sin(rotDelta);
-                                                                                 dirY = oldDirX * sin(rotDelta) + dirY * cos(rotDelta);
-                                                                                 float oldPlaneX = planeX;
-                                                                                 planeX = planeX * cos(rotDelta) - planeY * sin(rotDelta);
-                                                                                 planeY = oldPlaneX * sin(rotDelta) + planeY * cos(rotDelta);
-                                                                             }
-
-                                                                             renderFrame(screenChar, screenColor);
-                                                                             presentBuffer(screenChar, screenColor);
-
-                                                                             clearKeyState();
-                                                                             updateFPS();
-                                                                             usleep(16000);
-                                                                         }
-
-                                                                         if (mouseFd >= 0) close(mouseFd);
-                                                                         restoreTerminal();
-                                                                         return 0;
-                                                                     }
+    disableRaw();
+    clearScreen();
+    return 0;
+}
